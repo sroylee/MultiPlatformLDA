@@ -22,9 +22,12 @@ public class ModelRunner {
 	public static void runMultiPlatformLDA() {
 
 		String dataPath = "F:/Users/roylee/MultiPlatformLDAv1/MultiPlatformLDA/data";
+		//String dataPath = "F:/Users/roylee/MultiPlatformLDAv1/MultiPlatformLDA/data/synthetic";
 		int nTopics = 10;
 		int nPlatforms = 2;
+		int modelType = ModelType.USER_SPECIFIC;
 		String outputPath = "F:/Users/roylee/MultiPlatformLDAv1/MultiPlatformLDA/data/output";
+		//String outputPath = "F:/Users/roylee/MultiPlatformLDAv1/MultiPlatformLDA/data/synthetic/output";
 		
 		int burningPeriod = 1000;
 		int maxIteration = 5000;
@@ -42,10 +45,15 @@ public class ModelRunner {
 
 		model.nTopics = nTopics;
 		model.nPlatforms = nPlatforms;
+		model.modelType = modelType;
 		model.burningPeriod = burningPeriod;
 		model.maxIteration = maxIteration;
 		model.samplingGap = samplingGap;
 		model.testBatch = testBatch;
+		model.toOutputLikelihoodPerplexity = true;
+		model.toOutputInferedTopics = true;
+		model.toOutputTopicTopPosts = true;
+		model.toOutputInferedPlatforms = true;
 
 		model.rand = new Random();
 		model.learnModel();
