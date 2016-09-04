@@ -13,4 +13,5 @@ public class Post {
 	public int fixedTopic;
 	public double inferedLikelihood;
 	
+	public int inferedPlatform;// for the platform prediction task
 }
