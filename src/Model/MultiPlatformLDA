@@ -35,6 +35,7 @@ public class MultiPlatformLDA {
 	public String outputPath;
 	public int nTopics;
 	public int nPlatforms;
+	public int modelType;
 
 	public int burningPeriod;
 	public int maxIteration;
@@ -42,6 +43,11 @@ public class MultiPlatformLDA {
 	public int testBatch;
 
 	public Random rand;
+	
+	public boolean toOutputLikelihoodPerplexity;// option to output likelihood of train data and perplexity of test data
+	public boolean toOutputTopicTopPosts;// option to output top posts of each topic
+	public boolean toOutputInferedTopics;// option to output (all) posts' inferred topics
+	public boolean toOutputInferedPlatforms;// option to output inferred platform for posts in test batch
 	
 	//hyperparameters
 	private double alpha;
@@ -61,6 +67,7 @@ public class MultiPlatformLDA {
 	private double[][] topics;
 	private double[] backgroundTopic;
 	private double[] coinBias;
+	private double[][] globalTopicPlatformDistribution;// only used for model 2
 	
 	//Gibbs sampling variables
 	//user-topic count
@@ -77,9 +84,13 @@ public class MultiPlatformLDA {
 	private int[] n_c; //sum_nw[c]: total number of words that are associated with coin c
 	private int sum_nc;
 	
-	//user-topic-platform count
+	//user-topic-platform count: use by model-1
 	private int[][][] n_pu; //n_p[p,u,z]: number of times platform p is selected for a topic z that is observed in posts by user u
 	private int[][] sum_npu; //sum_npu[u,z]: number of times topic z is observed in posts by user u (This is same as sum_nz)
+	
+	//global-topic-platform count: use by model-2
+	private int[][] n_p; //n_p[p,z]: number of times platform p is selected for a topic z that is observed in all posts
+	private int[] sum_np; //sum_npu[z]: number of times topic z is observed in all posts
 	
 	private int[][] final_n_zu;
 	private int[] final_sum_nzu;
@@ -91,7 +102,9 @@ public class MultiPlatformLDA {
 	private int final_sum_nc;
 	private int[][][] final_n_pu;
 	private int[][] final_sum_npu;
-
+	private int[][] final_n_p;
+	private int[] final_sum_np;
+	
 	private double postLogLikelidhood;
 	private double postLogPerplexity;
 
@@ -223,16 +236,30 @@ public class MultiPlatformLDA {
 		}
 		final_sum_nc = 0;
 
-		// Final array of user-topic-platforms
-		final_n_pu = new int[users.length][nTopics][nPlatforms];
-		final_sum_npu = new int[users.length][nTopics];
-		for (int u = 0; u < users.length; u++) {
+		//Implementation for MultiPlatformLDA-UserSpecific
+		if (modelType == ModelType.USER_SPECIFIC) {
+			// Final array of user-topic-platforms
+			final_n_pu = new int[users.length][nTopics][nPlatforms];
+			final_sum_npu = new int[users.length][nTopics];
+			for (int u = 0; u < users.length; u++) {
+				for (int z = 0; z < nTopics; z++) {
+					for (int p = 0; p < nPlatforms; p++) {
+						final_n_pu[u][z][p] = 0;
+					}
+					final_sum_npu[u][z] = 0;
+				}
+			}
+		} else {
+		//Implementation for MultiPlatformLDA-Global
+			// Final array of global-topic-platforms
+			final_n_p = new int[nTopics][nPlatforms];
+			final_sum_np = new int[nTopics];
 			for (int z = 0; z < nTopics; z++) {
 				for (int p = 0; p < nPlatforms; p++) {
-					final_n_pu[u][z][p] = 0;
-				}
-				final_sum_npu[u][z] = 0;
-			}
+					final_n_p[z][p] = 0;
+					}
+				final_sum_np[z] = 0;
+			}	
 		}
 	}
 
@@ -286,17 +313,33 @@ public class MultiPlatformLDA {
 		n_c[0] = 0;
 		n_c[1] = 0;
 		sum_nc = 0;
-		//Init for user-topic-platform
-		n_pu = new int[users.length][nTopics][nPlatforms];
-		sum_npu = new int[users.length][nTopics];
-		for (int u = 0; u < users.length; u++) {
+		//Implementation for MultiPlatformLDA-UserSpecific
+		if (modelType == ModelType.USER_SPECIFIC) {
+			//Init for user-topic-platform
+			n_pu = new int[users.length][nTopics][nPlatforms];
+			sum_npu = new int[users.length][nTopics];
+			for (int u = 0; u < users.length; u++) {
+				for (int z = 0; z < nTopics; z++) {
+					for (int p = 0; p < nPlatforms; p++) {
+						n_pu[u][z][p] = 0;
+					}
+					sum_npu[u][z] = 0;
+				}
+			}
+		} else {
+		//Implementation for MultiPlatformLDA-Global
+			//Init for global-topic-platform
+			n_p = new int[nTopics][nPlatforms];
+			sum_np = new int[nTopics];
 			for (int z = 0; z < nTopics; z++) {
 				for (int p = 0; p < nPlatforms; p++) {
-					n_pu[u][z][p] = 0;
+					n_p[z][p] = 0;
 				}
-				sum_npu[u][z] = 0;
+				sum_np[z] = 0;
 			}
+			
 		}
+		
 
 		//Update counting tables
 		for (int u = 0; u < users.length; u++) {
@@ -308,10 +351,20 @@ public class MultiPlatformLDA {
 					n_zu[z][u]++;
 					sum_nzu[u]++;
 					
-					//Update user-topic-platform
-					int p = users[u].posts[j].platform;
-					n_pu[u][z][p]++;
-					sum_npu[u][z]++;
+					//Implementation for MultiPlatformLDA-UserSpecific
+					if (modelType == ModelType.USER_SPECIFIC) {
+						//Update user-topic-platform
+						int p = users[u].posts[j].platform;
+						n_pu[u][z][p]++;
+						sum_npu[u][z]++;
+					} else {
+					//Implementation for MultiPlatformLDA-Global
+						//Update global-topic-platform
+						int p = users[u].posts[j].platform;
+						n_p[z][p]++;
+						sum_np[z]++;
+					}
+					
 					
 					for (int i = 0; i < users[u].posts[j].words.length; i++) {
 						int w = users[u].posts[j].words[i];
@@ -343,7 +396,7 @@ public class MultiPlatformLDA {
 		alpha = 50.0 / nTopics;
 		sum_alpha = 50;
 
-		//User topic platform prior
+		//topic platform prior
 		mu = 0.01;
 		sum_mu = 0.01 *nPlatforms;
 		
@@ -361,80 +414,162 @@ public class MultiPlatformLDA {
 
 	//Sample the topic for post number j of user number u
 	private void samplePostTopic(int u, int j) {
-		//Get current topic
-		int currz = users[u].posts[j].topic;
 		
-		//Decrement user-topic count and sum
-		n_zu[currz][u]--;
-		sum_nzu[u]--;
-		//Decrement user-topic-platform count and sum
-		int currp  = users[u].posts[j].platform;
-		n_pu[u][currz][currp]--;
-		sum_npu[u][currz]--;
-		for (int i = 0; i < users[u].posts[j].words.length; i++) {
-			//Only consider the word belong to the topic not background
-			if (users[u].posts[j].coins[i] == 1) {
-				//Decrement topic-word count and sum
-				int w = users[u].posts[j].words[i];
-				n_wz[w][currz]--;
-				sum_nwz[currz]--;
-			}
-		}
-		
-		double sump = 0;
-		//p: p(z_u,s = z| rest)
-		double[] p = new double[nTopics];
-		for (int z = 0; z < nTopics; z++) {
-			//User-topic
-			p[z] = (n_zu[z][u] + alpha) / (sum_nzu[u] + sum_alpha);
+		//Implementation for MultiPlatformLDA-UserSpecific
+		if (modelType == ModelType.USER_SPECIFIC) {
+			//Get current topic
+			int currz = users[u].posts[j].topic;
 			
-			//User-topic-platform
-			p[z] = p[z] * (n_pu[u][z][currp] + mu) / (sum_npu[u][z] + sum_mu);
-			
-			//topic-word
+			//Decrement user-topic count and sum
+			n_zu[currz][u]--;
+			sum_nzu[u]--;
+			//Decrement user-topic-platform count and sum
+			int currp  = users[u].posts[j].platform;
+			n_pu[u][currz][currp]--;
+			sum_npu[u][currz]--;
 			for (int i = 0; i < users[u].posts[j].words.length; i++) {
 				//Only consider the word belong to the topic not background
-				if (users[u].posts[j].coins[i] == 1){
+				if (users[u].posts[j].coins[i] == 1) {
+					//Decrement topic-word count and sum
 					int w = users[u].posts[j].words[i];
-					p[z] = p[z] * (n_wz[w][z] + beta) / (sum_nwz[z] + sum_beta);
+					n_wz[w][currz]--;
+					sum_nwz[currz]--;
 				}
 			}
-			// cumulative
-			p[z] = sump + p[z];
-			sump = p[z];
-		}
-	
-		sump = rand.nextDouble() * sump;
-		for (int z = 0; z < nTopics; z++) {
-			if (sump > p[z])
-				continue;
-			//Sample topic
-			users[u].posts[j].topic = z;
 			
-			//Increment user-topic count and sum
-			n_zu[z][u]++;
-			sum_nzu[u]++;
+			double sump = 0;
+			//p: p(z_u,s = z| rest)
+			double[] p = new double[nTopics];
+			for (int z = 0; z < nTopics; z++) {
+				//User-topic
+				p[z] = (n_zu[z][u] + alpha) / (sum_nzu[u] + sum_alpha);
+				
+				//User-topic-platform
+				p[z] = p[z] * (n_pu[u][z][currp] + mu) / (sum_npu[u][z] + sum_mu);
+				
+				//topic-word
+				for (int i = 0; i < users[u].posts[j].words.length; i++) {
+					//Only consider the word belong to the topic not background
+					if (users[u].posts[j].coins[i] == 1){
+						int w = users[u].posts[j].words[i];
+						p[z] = p[z] * (n_wz[w][z] + beta) / (sum_nwz[z] + sum_beta);
+					}
+				}
+				// cumulative
+				p[z] = sump + p[z];
+				sump = p[z];
+			}
+		
+			sump = rand.nextDouble() * sump;
+			for (int z = 0; z < nTopics; z++) {
+				if (sump > p[z])
+					continue;
+				//Sample topic
+				users[u].posts[j].topic = z;
+				
+				//Increment user-topic count and sum
+				n_zu[z][u]++;
+				sum_nzu[u]++;
+				
+				//Increment user-topic-platform count and sum
+				n_pu[u][z][currp]++;
+				sum_npu[u][z]++;
+				
+				//Increment topic-word count and sum
+				for (int i = 0; i < users[u].posts[j].words.length; i++) {
+					//Only consider the word belong to the topic not background
+					if (users[u].posts[j].coins[i] == 1){
+						int w = users[u].posts[j].words[i];
+						n_wz[w][z]++;
+						sum_nwz[z]++;
+					}
+				}
+				return;
+			}
+			System.out.println("bug in samplePostTopic");
+			for (int z = 0; z < nTopics; z++) {
+				System.out.print(p[z] + " ");
+			}
+			System.exit(-1);
+		} else {
+		//Implementation for MultiPlatformLDA-Global
+			//Get current topic
+			int currz = users[u].posts[j].topic;
 			
-			//Increment user-topic-platform count and sum
-			n_pu[u][z][currp]++;
-			sum_npu[u][z]++;
-			
-			//Increment topic-word count and sum
+			//Decrement user-topic count and sum
+			n_zu[currz][u]--;
+			sum_nzu[u]--;
+			//Decrement global topic-platform count and sum
+			int currp  = users[u].posts[j].platform;
+			n_p[currz][currp]--;
+			sum_np[currz]--;
 			for (int i = 0; i < users[u].posts[j].words.length; i++) {
 				//Only consider the word belong to the topic not background
-				if (users[u].posts[j].coins[i] == 1){
+				if (users[u].posts[j].coins[i] == 1) {
+					//Decrement topic-word count and sum
 					int w = users[u].posts[j].words[i];
-					n_wz[w][z]++;
-					sum_nwz[z]++;
+					n_wz[w][currz]--;
+					sum_nwz[currz]--;
 				}
 			}
-			return;
+			
+			double sump = 0;
+			//p: p(z_u,s = z| rest)
+			double[] p = new double[nTopics];
+			for (int z = 0; z < nTopics; z++) {
+				//User-topic
+				p[z] = (n_zu[z][u] + alpha) / (sum_nzu[u] + sum_alpha);
+				
+				//global-topic-platform
+				p[z] = p[z] * (n_p[z][currp] + mu) / (sum_np[z] + sum_mu);
+				
+				//topic-word
+				for (int i = 0; i < users[u].posts[j].words.length; i++) {
+					//Only consider the word belong to the topic not background
+					if (users[u].posts[j].coins[i] == 1){
+						int w = users[u].posts[j].words[i];
+						p[z] = p[z] * (n_wz[w][z] + beta) / (sum_nwz[z] + sum_beta);
+					}
+				}
+				// cumulative
+				p[z] = sump + p[z];
+				sump = p[z];
+			}
+		
+			sump = rand.nextDouble() * sump;
+			for (int z = 0; z < nTopics; z++) {
+				if (sump > p[z])
+					continue;
+				//Sample topic
+				users[u].posts[j].topic = z;
+				
+				//Increment user-topic count and sum
+				n_zu[z][u]++;
+				sum_nzu[u]++;
+				
+				//Increment global-topic-platform count and sum
+				n_p[z][currp]++;
+				sum_np[z]++;
+				
+				//Increment topic-word count and sum
+				for (int i = 0; i < users[u].posts[j].words.length; i++) {
+					//Only consider the word belong to the topic not background
+					if (users[u].posts[j].coins[i] == 1){
+						int w = users[u].posts[j].words[i];
+						n_wz[w][z]++;
+						sum_nwz[z]++;
+					}
+				}
+				return;
+			}
+			System.out.println("bug in samplePostTopic");
+			for (int z = 0; z < nTopics; z++) {
+				System.out.print(p[z] + " ");
+			}
+			System.exit(-1);
+			
 		}
-		System.out.println("bug in samplePostTopic");
-		for (int z = 0; z < nTopics; z++) {
-			System.out.print(p[z] + " ");
-		}
-		System.exit(-1);
+		
 	}
 
 	//Sample the coin for the word number i of the post number j of user number u
@@ -499,12 +634,23 @@ public class MultiPlatformLDA {
 			final_sum_nzu[u] += sum_nzu[u];
 		}
 		
-		for (int u = 0; u < users.length; u++) {
+		//Implementation for MultiPlatformLDA-UserSpecific
+		if (modelType == ModelType.USER_SPECIFIC) {
+			for (int u = 0; u < users.length; u++) {
+				for (int z = 0; z < nTopics; z++) {
+					for (int p = 0; p < nPlatforms; p++) {
+						final_n_pu[u][z][p] += n_pu[u][z][p];
+					}
+					final_sum_npu[u][z] += sum_npu[u][z];
+				}
+			}	
+		} else {
+		//Implementation for MultiPlatformLDA-Global
 			for (int z = 0; z < nTopics; z++) {
 				for (int p = 0; p < nPlatforms; p++) {
-					final_n_pu[u][z][p] += n_pu[u][z][p];
+					final_n_p[z][p] += n_p[z][p];
 				}
-				final_sum_npu[u][z] += sum_npu[u][z];
+				final_sum_np[z] += sum_np[z];
 			}
 		}
 		
@@ -584,14 +730,27 @@ public class MultiPlatformLDA {
 			}
 		}
 		
-		//User-topic-platform distribution
-		for (int u = 0; u < users.length; u++) {
-			users[u].topicPlatformDistribution = new double[nTopics][nPlatforms];
+		//Implementation for MultiPlatformLDA-UserSpecific
+		if (modelType == ModelType.USER_SPECIFIC) {
+			//User-topic-platform distribution
+			for (int u = 0; u < users.length; u++) {
+				users[u].topicPlatformDistribution = new double[nTopics][nPlatforms];
+				for (int z = 0; z < nTopics; z++) {
+					for (int p = 0; p < nPlatforms; p++) {
+						users[u].topicPlatformDistribution[z][p] = (final_n_pu[u][z][p] + mu)/(final_sum_npu[u][z] + sum_mu);
+					}
+				}
+			}			
+		} else {
+		//Implementation for MultiPlatformLDA-Global
+			//Global-topic-platform distribution
+			globalTopicPlatformDistribution= new double[nTopics][nPlatforms];
 			for (int z = 0; z < nTopics; z++) {
 				for (int p = 0; p < nPlatforms; p++) {
-					users[u].topicPlatformDistribution[z][p] = (final_n_pu[u][z][p] + mu)/(final_sum_npu[u][z] + sum_mu);
+					globalTopicPlatformDistribution[z][p] = (final_n_p[z][p] + mu)/(final_sum_np[z] + sum_mu);
 				}
 			}
+			
 		}
 		
 		//Topic-word distribution
@@ -621,48 +780,120 @@ public class MultiPlatformLDA {
 	}
 	
 	private double getPostLikelihood(int u, int j) {
-		//Compute likelihood of post number j of user number u
+		// Compute likelihood of post number j of user number u
 		double logLikelihood = 0;
-		for (int i = 0; i < users[u].posts[j].words.length; i++) {
-			int w = users[u].posts[j].words[i];
-			//Probability that word i is generated by background topic
-			double p_0 = backgroundTopic[w] * coinBias[0];
-			//Probability that word i is generated by other topics
-			double p_1 = 0;
-			for (int z = 0; z < nTopics; z++) {
-				double p_z = topics[z][w] * users[u].topicDistribution[z];
-				p_1 = p_1 + p_z;
+		for (int z = 0; z < nTopics; z++) {
+			// likelihood of content given topic z
+			double content_LogLikelihood = 0;
+			for (int i = 0; i < users[u].posts[j].words.length; i++) {
+				int w = users[u].posts[j].words[i];
+				// Probability that word i is generated by background topic
+				double p_0 = backgroundTopic[w] * coinBias[0];
+				// Probability that word i is generated by topic z
+				double p_1 = topics[z][w] * coinBias[1];
+				content_LogLikelihood += Math.log10(p_0 + p_1);
 			}
-			p_1 = p_1 * coinBias[1];
-
-			logLikelihood = logLikelihood + Math.log10(p_0 + p_1);
+			// likelihood of platform given topic z
+			double platform_LogLikelihood = 0;
+			int p = users[u].posts[j].platform;
+			if (modelType == ModelType.USER_SPECIFIC) {
+				platform_LogLikelihood = Math.log10(users[u].topicPlatformDistribution[z][p]);
+			} else {
+				platform_LogLikelihood = Math.log10(globalTopicPlatformDistribution[z][p]);
+			}
+			// summing up
+			logLikelihood += Math.log10(users[u].topicDistribution[z]) + content_LogLikelihood + platform_LogLikelihood;
+			if (Double.isInfinite(logLikelihood)) {
+				System.out.printf("z = %d\n", z);
+				content_LogLikelihood = 1;
+				for (int i = 0; i < users[u].posts[j].words.length; i++) {
+					int w = users[u].posts[j].words[i];
+					// Probability that word i is generated by background topic
+					double p_0 = backgroundTopic[w] * coinBias[0];
+					// Probability that word i is generated by topic z
+					double p_1 = topics[z][w] * coinBias[1];
+					content_LogLikelihood *= (p_0 + p_1);
+					System.out.printf(
+							"i = %d w = %d backgroundTopic[w] = %f coinBias[0] = %f topics[z][w] = %f coinBias[1] = %f\n",
+							i, w, backgroundTopic[w], coinBias[0], topics[z][w], coinBias[1]);
+				}
+				// likelihood of platform given topic z
+				if (modelType == ModelType.USER_SPECIFIC) {
+					platform_LogLikelihood = users[u].topicPlatformDistribution[z][p];
+				} else {
+					platform_LogLikelihood = globalTopicPlatformDistribution[z][p];
+				}
+				System.out.printf("content_Likelihood = %f, platform_Likelihood = %f\n", content_LogLikelihood,
+						platform_LogLikelihood);
+				System.exit(-1);
+			}
 		}
-
 		return logLikelihood;
 	}
 
 	private double getPostLikelihood(int u, int j, int z) {
-		//Compute likelihood of post number j of user number u given the topic z
+		// Compute likelihood of post number j of user number u given the topic z
 		if (z >= 0) {
-			double logLikelihood = 0;
+			double content_logLikelihood = 0;
 			for (int i = 0; i < users[u].posts[j].words.length; i++) {
 				int w = users[u].posts[j].words[i];
-				//Probability that word i is generated by background topic
+				// Probability that word i is generated by background topic
 				double p_0 = backgroundTopic[w] * coinBias[0];
-				//Probability that word i is generated by topic z
+				// Probability that word i is generated by topic z
 				double p_1 = topics[z][w] * coinBias[1];
-				logLikelihood = logLikelihood + Math.log10(p_0 + p_1);
+				content_logLikelihood += Math.log10(p_0 + p_1);
 			}
-			return logLikelihood;
-		} else {
-			double logLikelihood = 0;
+			double platform_logLikelihood = 0;
+			int p = users[u].posts[j].platform;
+			if (modelType == ModelType.USER_SPECIFIC) {
+				platform_logLikelihood = Math.log10(users[u].topicPlatformDistribution[z][p]);
+			} else {
+				platform_logLikelihood = Math.log10(globalTopicPlatformDistribution[z][p]);
+			}
+
+			return (content_logLikelihood + platform_logLikelihood);
+		} else {// background topic only
+			double content_logLikelihood = 0;
 			for (int i = 0; i < users[u].posts[j].words.length; i++) {
 				int w = users[u].posts[j].words[i];
-				//Probability that word i is generated by background topic
+				// Probability that word i is generated by background topic
 				double p_0 = backgroundTopic[w];
-				logLikelihood = logLikelihood + Math.log10(p_0);
+				content_logLikelihood = content_logLikelihood + Math.log10(p_0);
 			}
-			return logLikelihood;
+			double platform_logLikelihood = Math.log10(1.0 / nPlatforms);// random
+			return (content_logLikelihood + platform_logLikelihood);
+		}
+	}
+
+	private double getPostLikelihood(int u, int j, int p, int z) {
+		// Compute likelihood of post number j of user number u given the platform is p and the topic is z
+		if (z >= 0) {
+			double content_logLikelihood = 0;
+			for (int i = 0; i < users[u].posts[j].words.length; i++) {
+				int w = users[u].posts[j].words[i];
+				// Probability that word i is generated by background topic
+				double p_0 = backgroundTopic[w] * coinBias[0];
+				// Probability that word i is generated by topic z
+				double p_1 = topics[z][w] * coinBias[1];
+				content_logLikelihood += Math.log10(p_0 + p_1);
+			}
+			double platform_logLikelihood = 0;
+			if (modelType == ModelType.USER_SPECIFIC) {
+				platform_logLikelihood = Math.log10(users[u].topicPlatformDistribution[z][p]);
+			} else {
+				platform_logLikelihood = Math.log10(globalTopicPlatformDistribution[z][p]);
+			}
+			return (content_logLikelihood + platform_logLikelihood);
+		} else {// background topic only
+			double content_logLikelihood = 0;
+			for (int i = 0; i < users[u].posts[j].words.length; i++) {
+				int w = users[u].posts[j].words[i];
+				// Probability that word i is generated by background topic
+				double p_0 = backgroundTopic[w];
+				content_logLikelihood = content_logLikelihood + Math.log10(p_0);
+			}
+			double platform_logLikelihood = Math.log10(1.0 / nPlatforms);// random
+			return (content_logLikelihood + platform_logLikelihood);
 		}
 	}
 
@@ -671,9 +902,9 @@ public class MultiPlatformLDA {
 		postLogPerplexity = 0;
 		int nTestPost = 0;
 		for (int u = 0; u < users.length; u++) {
-			for (int t = 0; t < users[u].posts.length; t++) {
-				double logLikelihood = getPostLikelihood(u, t);
-				if (users[u].posts[t].batch != testBatch)
+			for (int j = 0; j < users[u].posts.length; j++) {
+				double logLikelihood = getPostLikelihood(u, j);
+				if (users[u].posts[j].batch != testBatch)
 					postLogLikelidhood += logLikelihood;
 				else {
 					postLogPerplexity += (-logLikelihood);
@@ -683,7 +914,7 @@ public class MultiPlatformLDA {
 		}
 		postLogPerplexity /= nTestPost;
 	}
-
+	
 	private void inferPostTopic() {
 		for (int u = 0; u < users.length; u++) {
 			for (int j = 0; j < users[u].posts.length; j++) {
@@ -705,14 +936,30 @@ public class MultiPlatformLDA {
 		}
 	}
 
-	private void outputPostTopics() {
-		try {
-			String fileName = outputPath + "/topicWordDistributions.csv";
-			File file = new File(fileName);
-			if (!file.exists()) {
-				file.createNewFile();
+	private void inferPostPlatform() {
+		for (int u = 0; u < users.length; u++) {
+			for (int j = 0; j < users[u].posts.length; j++) {
+				if (users[u].posts[j].batch != testBatch)
+					continue;
+				double maxLikelihood = getPostLikelihood(u, j, 0, 0);
+				users[u].posts[j].inferedPlatform = 0;
+				for (int p = 0; p < nPlatforms; p++) {
+					for (int z = 0; z < nTopics; z++) {
+						double likeLihood = getPostLikelihood(u, j, p, z);
+						if (maxLikelihood < likeLihood) {
+							maxLikelihood = likeLihood;
+							users[u].posts[j].inferedPlatform = p;
+						}
+					}
+				}
 			}
-			BufferedWriter bw = new BufferedWriter(new FileWriter(file.getAbsoluteFile()));
+		}
+	}
+	
+	private void outputPostTopicWordDisributions() {
+		try {
+			String filename = outputPath + "/topicWordDistributions.csv";
+			BufferedWriter bw = new BufferedWriter(new FileWriter(filename));
 			for (int z = 0; z < nTopics; z++) {
 				bw.write("" + z);
 				for (int w = 0; w < vocabulary.length; w++)
@@ -721,15 +968,11 @@ public class MultiPlatformLDA {
 			}
 			bw.close();
 
-			fileName = outputPath + "/backgroundTopicWordDistribution.csv";
-			file = new File(fileName);
-			if (!file.exists()) {
-				file.createNewFile();
-			}
-			bw = new BufferedWriter(new FileWriter(file.getAbsoluteFile()));
+			filename = outputPath + "/backgroundTopicWordDistribution.csv";
+			bw = new BufferedWriter(new FileWriter(filename));
 			bw.write(backgroundTopic[0] + "");
 			for (int w = 1; w < vocabulary.length; w++)
-				bw.write("," + backgroundTopic[w]);			
+				bw.write("," + backgroundTopic[w]);
 			bw.close();
 		} catch (Exception e) {
 			System.out.println("Error in writing out topics to file!");
@@ -737,7 +980,7 @@ public class MultiPlatformLDA {
 			System.exit(0);
 		}
 	}
-
+	
 	private void outputCoinBias() {
 		try {
 			String fileName = outputPath + "/coinBias.csv";
@@ -789,7 +1032,79 @@ public class MultiPlatformLDA {
 			System.exit(0);
 		}
 	}
+	
+	private void outputTopicTopPosts(int k) {
+		int[] nTopicPosts = new int[nTopics];
+		int nBackgroundTopicPosts = 0;
+		for (int z = 0; z < nTopics; z++)
+			nTopicPosts[z] = 0;
+		for (int u = 0; u < users.length; u++) {
+			for (int j = 0; j < users[u].posts.length; j++) {
+				if (users[u].posts[j].batch == testBatch)
+					continue;
+				if (users[u].posts[j].inferedTopic >= 0)
+					nTopicPosts[users[u].posts[j].inferedTopic]++;
+				else
+					nBackgroundTopicPosts++;
+			}
+		}
 
+		String[][] postID = new String[nTopics][];
+		double[][] postPerplexity = new double[nTopics][];
+		for (int z = 0; z < nTopics; z++) {
+			postID[z] = new String[nTopicPosts[z]];
+			postPerplexity[z] = new double[nTopicPosts[z]];
+			nTopicPosts[z] = 0;
+		}
+		String[] backgroundTopicPostID = new String[nBackgroundTopicPosts];
+		double[] backgroundTopicPostPerplexity = new double[nBackgroundTopicPosts];
+		nBackgroundTopicPosts = 0;
+
+		for (int u = 0; u < users.length; u++) {
+			for (int j = 0; j < users[u].posts.length; j++) {
+				if (users[u].posts[j].batch == testBatch)
+					continue;
+				int z = users[u].posts[j].inferedTopic;
+				if (z >= 0) {
+					postID[z][nTopicPosts[z]] = users[u].posts[j].postID;
+					postPerplexity[z][nTopicPosts[z]] = users[u].posts[j].inferedLikelihood
+							/ users[u].posts[j].words.length;
+					nTopicPosts[z]++;
+				} else {
+					backgroundTopicPostID[nBackgroundTopicPosts] = users[u].posts[j].postID;
+					backgroundTopicPostPerplexity[nBackgroundTopicPosts] = users[u].posts[j].inferedLikelihood;
+					nBackgroundTopicPosts++;
+				}
+
+			}
+		}
+
+		try {
+			String filename = outputPath + "/postTopicTopPosts.csv";
+			BufferedWriter bw = new BufferedWriter(new FileWriter(filename));
+			RankingTool rankTool = new RankingTool();
+			WeightedElement[] topPosts = null;
+			for (int z = 0; z < nTopics; z++) {
+				bw.write(z + "\n");
+				topPosts = rankTool.getTopKbyWeight(postID[z], postPerplexity[z], k);
+				for (int j = 0; j < k; j++)
+					bw.write("," + topPosts[j].name + "," + topPosts[j].weight + "\n");
+			}
+
+			if (nBackgroundTopicPosts > 0) {
+				bw.write("background\n");
+				topPosts = rankTool.getTopKbyWeight(backgroundTopicPostID, backgroundTopicPostPerplexity, 2 * k);
+				for (int j = 0; j < 2 * k; j++)
+					bw.write("," + topPosts[j].name + "," + topPosts[j].weight + "\n");
+			}
+			bw.close();
+		} catch (Exception e) {
+			System.out.println("Error in writing out post topic top posts to file!");
+			e.printStackTrace();
+			System.exit(0);
+		}
+	}
+	
 	private void outputUserTopicDistribution() {
 		try {
 			String fileName = outputPath + "/userTopicDistributions.csv";
@@ -811,9 +1126,8 @@ public class MultiPlatformLDA {
 			System.exit(0);
 		}
 	}
-
 	
-	private void outputUserTopicPlatformDistribution() {
+	private void outputUserSpecificTopicPlatformDistribution() {
 		try {
 			String fileName = outputPath + "/userTopicPlatformDistributions.csv";
 			File file = new File(fileName);
@@ -839,6 +1153,25 @@ public class MultiPlatformLDA {
 		}
 	}
 	
+	private void outputGlobalTopicPlatformDistribution() {
+		try {
+			String filename = outputPath + "/globalTopicPlatformDistributions.csv";
+			BufferedWriter bw = new BufferedWriter(new FileWriter(filename));
+			for (int z = 0; z < nTopics; z++) {
+				bw.write("" + z);
+				for (int p = 0; p < nPlatforms; p++) {
+					bw.write("," + globalTopicPlatformDistribution[z][p]);
+				}
+				bw.write("\n");
+			}
+			bw.close();
+		} catch (Exception e) {
+			System.out.println("Error in writing out user topic distributions to file!");
+			e.printStackTrace();
+			System.exit(0);
+		}
+	}
+	
 	private void outputLikelihoodPerplexity() {
 		try {
 			String fileName = outputPath + "/likelihood-perplexity.csv";
@@ -859,17 +1192,11 @@ public class MultiPlatformLDA {
 
 	private void outputInferedTopic() {
 		try {
-			SystemTool.createFolder(outputPath, "inferedTopicCoin");
+			SystemTool.createFolder(outputPath, "inferedTopics");
 			for (int u = 0; u < users.length; u++) {
-				String fileName = outputPath + SystemTool.pathSeparator + "inferedTopicCoin" + SystemTool.pathSeparator
+				String filename = outputPath + SystemTool.pathSeparator + "inferedTopics" + SystemTool.pathSeparator
 						+ users[u].userID + ".txt";
-
-				File file = new File(fileName);
-				if (!file.exists()) {
-					file.createNewFile();
-				}
-				BufferedWriter bw = new BufferedWriter(new FileWriter(file.getAbsoluteFile()));
-				bw.write("posts\n");
+				BufferedWriter bw = new BufferedWriter(new FileWriter(filename));
 				for (int j = 0; j < users[u].posts.length; j++)
 					bw.write(users[u].posts[j].postID + "\t" + users[u].posts[j].inferedTopic + "\n");
 				bw.close();
@@ -881,6 +1208,27 @@ public class MultiPlatformLDA {
 		}
 	}
 
+	private void outputInferedPlatform() {
+		try {
+			SystemTool.createFolder(outputPath, "inferedPlatforms");
+			for (int u = 0; u < users.length; u++) {
+				String filename = outputPath + SystemTool.pathSeparator + "inferedPlatforms" + SystemTool.pathSeparator
+						+ users[u].userID + ".txt";
+				BufferedWriter bw = new BufferedWriter(new FileWriter(filename));
+				for (int j = 0; j < users[u].posts.length; j++) {
+					if (users[u].posts[j].batch != testBatch)
+						continue;
+					bw.write(users[u].posts[j].postID + "\t" + users[u].posts[j].inferedPlatform + "\n");
+				}
+				bw.close();
+			}
+		} catch (Exception e) {
+			System.out.println("Error in writing out post topics to file!");
+			e.printStackTrace();
+			System.exit(0);
+		}
+	}
+	
 	private void outputPostTopKTopics(int k) {
 		try {
 			String fileName = outputPath + SystemTool.pathSeparator + "postTopKTopics.csv";
@@ -926,14 +1274,32 @@ public class MultiPlatformLDA {
 	}
 	
 	public void outputAll() {
-		outputPostTopics();
+		outputPostTopicWordDisributions();
 		outputPostTopicTopWords(20);
-		outputUserTopicPlatformDistribution();
-		// outputInferedTopic();
-		outputUserTopicDistribution();
-		outputLikelihoodPerplexity();
-		// outputTweetTopKTopics(3);
 		outputCoinBias();
+		outputUserTopicDistribution();
+		if (modelType == ModelType.USER_SPECIFIC) {
+			outputUserSpecificTopicPlatformDistribution();
+		} else {
+			outputGlobalTopicPlatformDistribution();
+		}
+		if (toOutputTopicTopPosts || toOutputInferedTopics) {
+			inferPostTopic();
+			if (toOutputTopicTopPosts) {
+				outputTopicTopPosts(100);
+			}
+			if (toOutputInferedTopics) {
+				outputInferedTopic();
+			}
+		}
+		if (toOutputInferedPlatforms) {
+			inferPostPlatform();
+			outputInferedPlatform();
+		}
+		if (toOutputLikelihoodPerplexity) {
+			getLikelihoodPerplexity();
+			outputLikelihoodPerplexity();
+		}
 	}
 
 }
