@@ -1080,21 +1080,22 @@ public class MultiPlatformLDA {
 		}
 
 		try {
-			String filename = outputPath + "/postTopicTopPosts.csv";
+			String filename = outputPath + "/topicTopPosts.csv";
 			BufferedWriter bw = new BufferedWriter(new FileWriter(filename));
 			RankingTool rankTool = new RankingTool();
 			WeightedElement[] topPosts = null;
 			for (int z = 0; z < nTopics; z++) {
 				bw.write(z + "\n");
-				topPosts = rankTool.getTopKbyWeight(postID[z], postPerplexity[z], k);
-				for (int j = 0; j < k; j++)
+				topPosts = rankTool.getTopKbyWeight(postID[z], postPerplexity[z], Math.min(k, nTopicPosts[z]));
+				for (int j = 0; j < Math.min(k, nTopicPosts[z]); j++)
 					bw.write("," + topPosts[j].name + "," + topPosts[j].weight + "\n");
 			}
 
 			if (nBackgroundTopicPosts > 0) {
 				bw.write("background\n");
-				topPosts = rankTool.getTopKbyWeight(backgroundTopicPostID, backgroundTopicPostPerplexity, 2 * k);
-				for (int j = 0; j < 2 * k; j++)
+				topPosts = rankTool.getTopKbyWeight(backgroundTopicPostID, backgroundTopicPostPerplexity,
+						Math.min(k, nBackgroundTopicPosts));
+				for (int j = 0; j < Math.min(k, nBackgroundTopicPosts); j++)
 					bw.write("," + topPosts[j].name + "," + topPosts[j].weight + "\n");
 			}
 			bw.close();
