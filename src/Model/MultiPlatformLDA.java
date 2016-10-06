@@ -1239,12 +1239,12 @@ public class MultiPlatformLDA {
 			SystemTool.createFolder(outputPath, "inferedPlatforms");
 			for (int u = 0; u < users.length; u++) {
 				String filename = outputPath + SystemTool.pathSeparator + "inferedPlatforms" + SystemTool.pathSeparator
-						+ users[u].userID + ".txt";
+						+ users[u].userID + ".csv";
 				BufferedWriter bw = new BufferedWriter(new FileWriter(filename));
 				for (int j = 0; j < users[u].posts.length; j++) {
 					if (users[u].posts[j].batch != testBatch)
 						continue;
-					bw.write(users[u].posts[j].postID + "\t" + users[u].posts[j].inferedPlatform + "\n");
+					bw.write(users[u].posts[j].postID + "," + users[u].posts[j].inferedPlatform + "," +  users[u].posts[j].platform + "\n");
 				}
 				bw.close();
 			}
