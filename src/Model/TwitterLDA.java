@@ -123,11 +123,11 @@ public class TwitterLDA {
 				users[u].userID = userId;
 
 				// Read the number of posts from user
+				// Read the number of posts from user
 				int nPost = 0;
 				br = new BufferedReader(new FileReader(postFile.getAbsolutePath()));
-				while ((line = br.readLine()) != null) {
-					if (Integer.parseInt(line.split(",")[1]) == platform)
-						nPost++;
+				while (br.readLine() != null) {
+					nPost++;
 				}
 				br.close();
 
@@ -138,8 +138,7 @@ public class TwitterLDA {
 				br = new BufferedReader(new FileReader(postFile.getAbsolutePath()));
 				int j = -1;
 				while ((line = br.readLine()) != null) {
-					if (Integer.parseInt(line.split(",")[1]) != platform)
-						continue;
+					
 					j++;
 					users[u].posts[j] = new Post();
 
@@ -149,7 +148,8 @@ public class TwitterLDA {
 						users[u].posts[j].postID = sc.next();
 						users[u].posts[j].platform = sc.nextInt();
 						users[u].posts[j].batch = sc.nextInt();
-
+						
+					
 						// Read the words in each post
 						String[] tokens = sc.next().toString().split(" ");
 						users[u].posts[j].words = new int[tokens.length];
