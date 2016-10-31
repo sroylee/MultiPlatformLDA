@@ -151,7 +151,7 @@ public class MultiPlatformLDA {
 			for (File postFile : postFolder.listFiles()) {
 				u++;
 				users[u] = new User();
-
+				
 				// Read index of the user
 				String userId = FilenameUtils.removeExtension(postFile.getName());
 				userId2Index.put(userId, u);
@@ -182,7 +182,7 @@ public class MultiPlatformLDA {
 						users[u].posts[j].postID = sc.next();
 						users[u].posts[j].platform = sc.nextInt();
 						users[u].posts[j].batch = sc.nextInt();
-
+						
 						// Read the words in each post
 						String[] tokens = sc.next().toString().split(" ");
 						users[u].posts[j].words = new int[tokens.length];
@@ -412,12 +412,15 @@ public class MultiPlatformLDA {
 
 	private void setPriors() {
 		// User topic prior
-		alpha = 50.0 / nTopics;
-		sum_alpha = 50;
+		alpha = 100.0 / nTopics;
+		sum_alpha = 100;
 
 		// topic platform prior
-		mu = 0.01;
-		sum_mu = 0.01 * nPlatforms;
+//		mu = 0.1;
+//		sum_mu = 0.1 * nPlatforms;
+		
+		mu = 30.0/nPlatforms;
+		sum_mu = 30;
 
 		// Topic tweet word prior
 		beta = 0.01;
