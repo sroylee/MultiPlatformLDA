@@ -21,7 +21,7 @@ import hoang.larc.tooler.SystemTool;
 public class ModelRunner {
 	
 	public static void main(String args[]) {
-		 //runTwitterLDA();
+		//runTwitterLDA();
 		runMultiPlatformLDA();
 	}
 	
@@ -29,15 +29,14 @@ public class ModelRunner {
 
 		String dataPath = "F:/Users/roylee/MultiPlatformLDAv1/MultiPlatformLDA/data";
 		//String dataPath = "F:/Users/roylee/MultiPlatformLDAv1/MultiPlatformLDA/data/synthetic";
-		int nTopics = 5;
+		int nTopics = 40;
 		int nPlatforms = 3;
 		int modelType = ModelType.USER_SPECIFIC;
 		//int modelType = ModelType.GLOBAL;
 		String outputPath = "F:/Users/roylee/MultiPlatformLDAv1/MultiPlatformLDA/data/output";
-		//String outputPath = "F:/Users/roylee/MultiPlatformLDAv1/MultiPlatformLDA/data/synthetic/output";
 		
-		int burningPeriod = 10;
-		int maxIteration = 50;
+		int burningPeriod = 100;
+		int maxIteration = 500;
 		int samplingGap = 20;
 		int testBatch = 0;
 
@@ -72,12 +71,12 @@ public class ModelRunner {
 
 		String dataPath = "F:/Users/roylee/MultiPlatformLDAv1/MultiPlatformLDA/data";
 		int platform = 1;
-		int nTopics = 10;
+		int nTopics = 100;
 		String outputPath = "F:/Users/roylee/MultiPlatformLDAv1/MultiPlatformLDA/data/output/TwitterLDA";
 
-		int burningPeriod = 2;
-		int maxIteration = 5;
-		int samplingGap = 1;
+		int burningPeriod = 100;
+		int maxIteration = 500;
+		int samplingGap = 20;
 		int testBatch = 0;
 
 		TwitterLDA model = new TwitterLDA();
